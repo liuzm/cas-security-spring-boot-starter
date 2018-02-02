@@ -14,6 +14,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.autoconfigure.security.SecurityAuthorizeMode;
 import org.springframework.boot.autoconfigure.security.SecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.SecurityProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,7 +22,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.cas.ServiceProperties;
 import org.springframework.security.cas.userdetails.AbstractCasAssertionUserDetailsService;
@@ -43,6 +43,7 @@ import static com.kakawait.spring.boot.security.cas.CasSecurityAutoConfiguration
 import static com.kakawait.spring.boot.security.cas.CasSecurityAutoConfiguration.DefaultCasSecurityConfigurerAdapter;
 import static com.kakawait.spring.boot.security.cas.CasSecurityAutoConfiguration.DynamicCasSecurityConfiguration;
 import static com.kakawait.spring.boot.security.cas.CasSecurityAutoConfiguration.StaticCasSecurityConfiguration;
+import static com.kakawait.spring.boot.security.cas.CasSecurityProperties.CAS_AUTH_ORDER;
 
 /**
  * @author Thibaud Leprêtre
@@ -67,6 +68,7 @@ public class CasSecurityAutoConfiguration {
 
         URI baseUrl = casSecurityProperties.getService().getBaseUrl();
         serviceProperties.setService(buildUrl(baseUrl, casSecurityProperties.getService().getPaths().getLogin()));
+        serviceProperties.setAuthenticateAllArtifacts(true);
         return serviceProperties;
     }
 
@@ -74,7 +76,9 @@ public class CasSecurityAutoConfiguration {
     @ConditionalOnMissingBean(ServiceProperties.class)
     @ConditionalOnProperty(value = "security.cas.service.resolution-mode", havingValue = "dynamic")
     ServiceProperties laxServiceProperties() {
-        return new LaxServiceProperties();
+        LaxServiceProperties serviceProperties = new LaxServiceProperties();
+        serviceProperties.setAuthenticateAllArtifacts(true);
+        return serviceProperties;
     }
 
     @Bean
@@ -148,12 +152,20 @@ public class CasSecurityAutoConfiguration {
         ServiceAuthenticationDetailsSource serviceAuthenticationDetailsSource(
                 CasSecurityProperties casSecurityProperties) {
             String proxyCallbackPath = casSecurityProperties.getService().getPaths().getProxyCallback();
-            return new ProxyCallbackAndServiceAuthenticationDetailsSource(getServiceProperties(), proxyCallbackPath);
+            URI proxyCallbackUri = null;
+            if (proxyCallbackPath != null) {
+                URI callbackBaseUrl = casSecurityProperties.getService().getCallbackBaseUrl();
+                proxyCallbackUri = callbackBaseUrl != null
+                        ? UriComponentsBuilder.fromUri(callbackBaseUrl).path(proxyCallbackPath).build().toUri()
+                        : URI.create(proxyCallbackPath);
+            }
+            return new ProxyCallbackAndServiceAuthenticationDetailsSource(getServiceProperties(), proxyCallbackUri);
         }
     }
 
-    @Order(Ordered.HIGHEST_PRECEDENCE)
     static class DefaultCasSecurityConfigurerAdapter extends CasSecurityConfigurerAdapter {
+
+        private final SecurityProperties securityProperties;
 
         private final CasSecurityProperties casSecurityProperties;
 
@@ -163,10 +175,12 @@ public class CasSecurityAutoConfiguration {
 
         private final ProxyGrantingTicketStorage proxyGrantingTicketStorage;
 
-        public DefaultCasSecurityConfigurerAdapter(CasSecurityProperties casSecurityProperties,
+        public DefaultCasSecurityConfigurerAdapter(SecurityProperties securityProperties,
+                CasSecurityProperties casSecurityProperties,
                 AbstractCasAssertionUserDetailsService userDetailsService,
                 ServiceAuthenticationDetailsSource authenticationDetailsSource,
                 ProxyGrantingTicketStorage proxyGrantingTicketStorage) {
+            this.securityProperties = securityProperties;
             this.casSecurityProperties = casSecurityProperties;
             this.userDetailsService = userDetailsService;
             this.authenticationDetailsSource = authenticationDetailsSource;
@@ -192,15 +206,26 @@ public class CasSecurityAutoConfiguration {
             String logoutSuccessUrl = buildUrl(casSecurityProperties.getServer().getBaseUrl(),
                     casSecurityProperties.getServer().getPaths().getLogout());
             http.logout().permitAll().logoutSuccessUrl(logoutSuccessUrl);
+
+            SecurityAuthorizeMode mode = casSecurityProperties.getAuthorizeMode();
+            if (mode == SecurityAuthorizeMode.ROLE) {
+                List<String> roles = securityProperties.getUser().getRole();
+                http.authorizeRequests().anyRequest().hasAnyRole(roles.toArray(new String[roles.size()]));
+            } else if (mode == SecurityAuthorizeMode.AUTHENTICATED) {
+                http.authorizeRequests().anyRequest().authenticated();
+            }
         }
 
         @Override
         public void configure(CasTicketValidatorBuilder ticketValidator) {
-            URI baseUrl = casSecurityProperties.getService().getBaseUrl();
+            URI baseUrl = (casSecurityProperties.getService().getCallbackBaseUrl() != null)
+                    ? casSecurityProperties.getService().getCallbackBaseUrl()
+                    : casSecurityProperties.getService().getBaseUrl();
             ticketValidator.protocolVersion(casSecurityProperties.getServer().getProtocolVersion());
             String proxyCallback = casSecurityProperties.getService().getPaths().getProxyCallback();
-            if (proxyCallback != null) {
-                ticketValidator.proxyCallbackUrl(buildUrl(baseUrl, proxyCallback));
+            if (baseUrl != null && proxyCallback != null) {
+                String proxyCallbackUrl = buildUrl(baseUrl, proxyCallback);
+                ticketValidator.proxyCallbackUrl(proxyCallbackUrl);
             }
             if (!casSecurityProperties.getProxyValidation().isEnabled()) {
                 ticketValidator.proxyChainsValidation(false);
@@ -217,7 +242,7 @@ public class CasSecurityAutoConfiguration {
         }
     }
 
-    @Order(SecurityProperties.BASIC_AUTH_ORDER - 1)
+    @Order(CAS_AUTH_ORDER)
     static class CasLoginSecurityConfiguration extends WebSecurityConfigurerAdapter {
 
         private final List<CasSecurityConfigurer> configurers;
@@ -254,6 +279,11 @@ public class CasSecurityAutoConfiguration {
                     paths.add(path);
                 }
             }
+            // Add login, logout and proxy-callback paths in order to be handle by CasAuthenticationFilter.
+            // Without authentication will be broken.
+            paths.add(casSecurityProperties.getService().getPaths().getLogin());
+            paths.add(casSecurityProperties.getService().getPaths().getLogout());
+            paths.add(casSecurityProperties.getService().getPaths().getProxyCallback());
             return paths.toArray(new String[paths.size()]);
         }
     }
