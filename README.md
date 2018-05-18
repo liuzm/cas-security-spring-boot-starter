@@ -1,6 +1,6 @@
 # Spring Security CAS starter
 
-[![Maven Central](https://img.shields.io/maven-central/v/com.kakawait/cas-security-spring-boot-starter.svg)](https://search.maven.org/#artifactdetails%7Ccom.kakawait%7Ccas-security-spring-boot-starter%7C0.6.1%7Cjar)
+[![Maven Central](https://img.shields.io/maven-central/v/com.kakawait/cas-security-spring-boot-starter.svg)](https://search.maven.org/#artifactdetails%7Ccom.kakawait%7Ccas-security-spring-boot-starter%7C0.7.1%7Cjar)
 [![license](https://img.shields.io/github/license/kakawait/cas-security-spring-boot-starter.svg)](https://github.com/kakawait/cas-security-spring-boot-starter/blob/master/LICENSE.md)
 
 > A Spring boot starter that will help you configure [Spring Security Cas](http://docs.spring.io/spring-security/site/docs/current/reference/html/cas.html) within the application security context.
@@ -11,6 +11,7 @@
 - Support dynamic service resolution based on current `HttpServletRequest`
 - Advance configuration through [CasSecurityConfigurerAdapter](https://github.com/kakawait/cas-security-spring-boot-starter/blob/master/cas-security-spring-boot-autoconfigure/src/main/java/com/kakawait/spring/boot/security/cas/CasSecurityConfigurerAdapter.java)
 - Integration with _Basic authentication_ if `security.basic.enabled=true` that allow you to authenticate using header `Authorization: Basic ...` in addition to _CAS_
+- `RestTemplate` integration
 
 ## Setup
 
@@ -20,7 +21,7 @@ Add the Spring boot starter to your project
 <dependency>
   <groupId>com.kakawait</groupId>
   <artifactId>cas-security-spring-boot-starter</artifactId>
-  <version>0.6.1</version>
+  <version>0.7.1</version>
 </dependency>
 ```
 
@@ -189,21 +190,21 @@ If you want to change those behaviors, for example by adding a logout page that 
 class CasCustomLogoutConfiguration extends CasSecurityConfigurerAdapter {
     private final CasSecurityProperties casSecurityProperties;
 
-    public CasCustomLogoutConfiguration(CasSecurityProperties casSecurityProperties) {
-        this.casSecurityProperties = casSecurityProperties;
+    private final LogoutSuccessHandler casLogoutSuccessHandler;
+    
+    public CustomLogoutConfiguration(LogoutSuccessHandler casLogoutSuccessHandler) {
+        this.casLogoutSuccessHandler = casLogoutSuccessHandler;
     }
 
     @Override
     public void configure(HttpSecurity http) throws Exception {
         http.logout()
             .permitAll()
+            // Add null logoutSuccessHandler to disable CasLogoutSuccessHandler
+            .logoutSuccessHandler(null)
             .logoutSuccessUrl("/logout.html")
             .logoutRequestMatcher(new AntPathRequestMatcher("/logout"));
-        String logoutUrl = UriComponentsBuilder
-                .fromUri(casSecurityProperties.getServer().getBaseUrl())
-                .path(casSecurityProperties.getServer().getPaths().getLogout())
-                .toUriString();
-        LogoutFilter filter = new LogoutFilter(logoutUrl, new SecurityContextLogoutHandler());
+        LogoutFilter filter = new LogoutFilter(casLogoutSuccessHandler, new SecurityContextLogoutHandler());
         filter.setFilterProcessesUrl("/cas/logout");
         http.addFilterBefore(filter, LogoutFilter.class);
     }
@@ -276,6 +277,37 @@ security.cas.proxy-validation.chains[0] = http://localhost:8180, http://localhos
 security.cas.proxy-validation.chains[1] = http://localhost:8280, http://localhost:8281
 security.cas.proxy-validation.chains[2] = ^http://my\\.domain\\..*
 ```
+
+## RestTemplate integration with Proxy ticket
+
+Since `0.7.0` version, there is a simple integration with `RestTemplate` but not enabled by default.
+
+In order to enabled it you must create your own `RestTemplate` bean and adding an _interceptor_
+
+```java
+@Bean
+RestTemplate casRestTemplate(ServiceProperties serviceProperties, ProxyTicketProvider proxyTicketProvider) {
+    RestTemplate restTemplate = new RestTemplate();
+    restTemplate.getInterceptors().add(new CasAuthorizationInterceptor(serviceProperties, proxyTicketProvider));
+    return restTemplate;
+}
+```
+
+This _interceptor_ is pretty simple, it will simply ask a new _proxy ticket_ for each request and append it to request query parameter.
+For example with: `http://httpbin.org/get` interceptor will modify request uri to become `http://httpbin.org/get?ticket=PT-XX-YYYYYYYYYY`.
+
+**ATTENTION** if _interceptor_ get any issue to get _proxy ticket_ from CAS server, it will throw an `IllegalStateException`.
+
+Please checkout You can found sample usage for both on [`CasSecuritySpringBootSampleApplication`](https://github.com/kakawait/cas-security-spring-boot-starter/blob/master/cas-security-spring-boot-sample/src/main/java/com/kakawait/CasSecuritySpringBootSampleApplication.java) to get an sample usage.
+
+### AssertionProvider and ProxyTicketProvider
+
+In addition to `RestTemplate` integration, since `0.7.0` there is now two new autoconfigured beans:
+
+1. `AssertionProvider` that will provide you a way to retrieve the current (bounded to current authenticated request) `org.jasig.cas.client.validation.Assertion`
+2. `ProxyTicketProvider` that will provide you a simple way to ask a _proxy ticket_ for a given service (regarding the current authenticated request)
+
+You can found sample usage for both on [`CasSecuritySpringBootSampleApplication`](https://github.com/kakawait/cas-security-spring-boot-starter/blob/master/cas-security-spring-boot-sample/src/main/java/com/kakawait/CasSecuritySpringBootSampleApplication.java)
 
 ## License
 
