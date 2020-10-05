@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                         http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -10,7 +10,7 @@
     <parent>
         <groupId>com.kakawait</groupId>
         <artifactId>cas-security-spring-boot-parent</artifactId>
-        <version>0.7.1</version>
+        <version>1.0.5</version>
     </parent>
 
     <name>Cas security spring boot starter</name>
@@ -31,38 +31,7 @@
             <artifactId>spring-security-cas-extension</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- Deprecated since 0.4.0, will be removed on 1.0.0 -->
-        <dependency>
-            <groupId>com.kakawait</groupId>
-            <artifactId>cas-security-dynamic-service-resolver</artifactId>
-            <version>0.4.0</version>
-        </dependency>
     </dependencies>
 
-    <profiles>
-        <profile>
-            <id>release</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-source-plugin</artifactId>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-javadoc-plugin</artifactId>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-gpg-plugin</artifactId>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.sonatype.plugins</groupId>
-                        <artifactId>nexus-staging-maven-plugin</artifactId>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>
 
